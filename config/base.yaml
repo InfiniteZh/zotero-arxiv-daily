@@ -20,6 +20,17 @@ email:
   smtp_port: ??? # The port of SMTP server. Example: 465
   sender_password: ??? # The password of the sender account. Note that it's not necessarily the password for logging in the e-mail client, but the authentication code for SMTP service. Ask your email provider for this. Example: abcdefghijklmn
 
+delivery:
+  mode: email # Delivery backend. Example: email or nanoclaw
+
+nanoclaw:
+  enabled: false # Whether NanoClaw handoff is enabled. Example: true
+  endpoint: null # NanoClaw batch endpoint. Example: http://localhost:3000/api/paper-digests
+  token: null # NanoClaw bearer token. Example: secret-token
+  timeout: 30 # Request timeout in seconds. Example: 30
+  include_full_text: true # Whether to include extracted full text in the payload. Example: true
+  max_retries: 3 # Number of retries for 5xx and network failures. Example: 3
+
 llm:
   api:
     key: ??? # API Key of your LLM API. Example: sk-xxx
