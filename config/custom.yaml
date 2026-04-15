@@ -14,12 +14,12 @@ delivery:
   mode: ${oc.env:DELIVERY_MODE,nanoclaw}
 
 nanoclaw:
-  enabled: ${oc.env:NANOCLAW_ENABLED,true}
+  enabled: ${oc.decode:${oc.env:NANOCLAW_ENABLED,true}}
   endpoint: ${oc.env:NANOCLAW_ENDPOINT,http://localhost:3000/api/paper-digests}
   token: ${oc.env:NANOCLAW_TOKEN,null}
-  timeout: ${oc.env:NANOCLAW_TIMEOUT,30}
-  include_full_text: ${oc.env:NANOCLAW_INCLUDE_FULL_TEXT,true}
-  max_retries: ${oc.env:NANOCLAW_MAX_RETRIES,3}
+  timeout: ${oc.decode:${oc.env:NANOCLAW_TIMEOUT,30}}
+  include_full_text: ${oc.decode:${oc.env:NANOCLAW_INCLUDE_FULL_TEXT,true}}
+  max_retries: ${oc.decode:${oc.env:NANOCLAW_MAX_RETRIES,3}}
 
 llm:
   api:
