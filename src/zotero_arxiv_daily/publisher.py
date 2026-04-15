@@ -1,4 +1,11 @@
+import json
+from time import sleep
 from typing import Any
+
+from loguru import logger
+from omegaconf import DictConfig
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 from .protocol import Paper
 
@@ -32,3 +39,77 @@ def build_batch_payload(config, papers: list[Paper], *, generated_at: str) -> di
         "paper_count": len(papers),
         "papers": [_paper_to_payload(paper, include_full_text) for paper in papers],
     }
+
+
+def _validate_nanoclaw_config(config: DictConfig):
+    if not bool(config.nanoclaw.enabled):
+        raise RuntimeError("nanoclaw publishing is disabled")
+    if not config.nanoclaw.endpoint:
+        raise RuntimeError("nanoclaw endpoint is missing")
+    if not config.nanoclaw.token:
+        raise RuntimeError("nanoclaw token is missing")
+
+
+def _make_request(config: DictConfig, payload: dict[str, Any]) -> Request:
+    body = json.dumps(payload).encode("utf-8")
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {config.nanoclaw.token}",
+    }
+    return Request(config.nanoclaw.endpoint, data=body, headers=headers, method="POST")
+
+
+def _parse_response_body(raw_body: bytes) -> dict[str, Any]:
+    if not raw_body:
+        return {"ok": True}
+    return json.loads(raw_body.decode("utf-8"))
+
+
+def publish_batch(config: DictConfig, papers: list[Paper], *, generated_at: str) -> dict[str, Any]:
+    _validate_nanoclaw_config(config)
+    payload = build_batch_payload(config, papers, generated_at=generated_at)
+    request = _make_request(config, payload)
+    max_retries = int(config.nanoclaw.max_retries)
+    timeout = int(config.nanoclaw.timeout)
+
+    last_error: Exception | None = None
+    for attempt in range(max_retries + 1):
+        try:
+            with urlopen(request, timeout=timeout) as response:
+                response_body = _parse_response_body(response.read())
+            logger.info(
+                "Accepted nanoclaw batch {} with {} papers",
+                payload["batch_id"],
+                payload["paper_count"],
+            )
+            return response_body
+        except HTTPError as error:
+            body_text = error.read().decode("utf-8", errors="replace") if hasattr(error, "read") else ""
+            if error.code in (400, 401):
+                raise RuntimeError(f"nanoclaw publish failed with HTTP {error.code}: {body_text}")
+            if error.code >= 500 and attempt < max_retries:
+                last_error = error
+                logger.warning(
+                    "nanoclaw publish failed with HTTP {} on attempt {}/{}; retrying",
+                    error.code,
+                    attempt + 1,
+                    max_retries + 1,
+                )
+                sleep(1)
+                continue
+            raise RuntimeError(f"nanoclaw publish failed with HTTP {error.code}: {body_text}")
+        except URLError as error:
+            if attempt < max_retries:
+                last_error = error
+                logger.warning(
+                    "nanoclaw publish failed with network error on attempt {}/{}; retrying",
+                    attempt + 1,
+                    max_retries + 1,
+                )
+                sleep(1)
+                continue
+            raise RuntimeError(f"nanoclaw publish failed after network retries: {error}") from error
+
+    if last_error is not None:
+        raise RuntimeError(f"nanoclaw publish failed: {last_error}")
+    raise RuntimeError("nanoclaw publish failed")
