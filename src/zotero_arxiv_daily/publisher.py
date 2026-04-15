@@ -68,48 +68,77 @@ def _parse_response_body(raw_body: bytes) -> dict[str, Any]:
 def publish_batch(config: DictConfig, papers: list[Paper], *, generated_at: str) -> dict[str, Any]:
     _validate_nanoclaw_config(config)
     payload = build_batch_payload(config, papers, generated_at=generated_at)
-    request = _make_request(config, payload)
+    endpoint = str(config.nanoclaw.endpoint)
+    batch_id = payload["batch_id"]
     max_retries = int(config.nanoclaw.max_retries)
     timeout = int(config.nanoclaw.timeout)
 
     last_error: Exception | None = None
     for attempt in range(max_retries + 1):
+        request = _make_request(config, payload)
         try:
             with urlopen(request, timeout=timeout) as response:
                 response_body = _parse_response_body(response.read())
             logger.info(
-                "Accepted nanoclaw batch {} with {} papers",
-                payload["batch_id"],
+                "Accepted nanoclaw batch {} at {} with {} papers",
+                batch_id,
+                endpoint,
                 payload["paper_count"],
             )
             return response_body
         except HTTPError as error:
             body_text = error.read().decode("utf-8", errors="replace") if hasattr(error, "read") else ""
             if error.code in (400, 401):
+                logger.error(
+                    "nanoclaw publish failed for batch {} at {} with HTTP {}",
+                    batch_id,
+                    endpoint,
+                    error.code,
+                )
                 raise RuntimeError(f"nanoclaw publish failed with HTTP {error.code}: {body_text}")
             if error.code >= 500 and attempt < max_retries:
                 last_error = error
                 logger.warning(
-                    "nanoclaw publish failed with HTTP {} on attempt {}/{}; retrying",
+                    "nanoclaw publish failed for batch {} at {} with HTTP {} on attempt {}/{}; retrying",
+                    batch_id,
+                    endpoint,
                     error.code,
                     attempt + 1,
                     max_retries + 1,
                 )
                 sleep(1)
                 continue
+            logger.error(
+                "nanoclaw publish failed for batch {} at {} with HTTP {} after {}/{} attempts",
+                batch_id,
+                endpoint,
+                error.code,
+                attempt + 1,
+                max_retries + 1,
+            )
             raise RuntimeError(f"nanoclaw publish failed with HTTP {error.code}: {body_text}")
         except URLError as error:
             if attempt < max_retries:
                 last_error = error
                 logger.warning(
-                    "nanoclaw publish failed with network error on attempt {}/{}; retrying",
+                    "nanoclaw publish failed for batch {} at {} with network error on attempt {}/{}; retrying",
+                    batch_id,
+                    endpoint,
                     attempt + 1,
                     max_retries + 1,
                 )
                 sleep(1)
                 continue
+            logger.error(
+                "nanoclaw publish failed for batch {} at {} with network error after {}/{} attempts",
+                batch_id,
+                endpoint,
+                attempt + 1,
+                max_retries + 1,
+            )
             raise RuntimeError(f"nanoclaw publish failed after network retries: {error}") from error
 
     if last_error is not None:
+        logger.error("nanoclaw publish failed for batch {} at {}", batch_id, endpoint)
         raise RuntimeError(f"nanoclaw publish failed: {last_error}")
     raise RuntimeError("nanoclaw publish failed")

@@ -175,6 +175,29 @@ def test_publish_batch_fails_fast_on_401(config, monkeypatch):
         publish_batch(config, [paper], generated_at="2026-04-15T09:30:00+08:00")
 
 
+def test_publish_batch_fails_fast_on_400(config, monkeypatch):
+    with open_dict(config):
+        config.nanoclaw.enabled = True
+        config.nanoclaw.endpoint = "https://nanoclaw.example/api/paper-digests"
+        config.nanoclaw.token = "secret-token"
+
+    paper = make_sample_paper(title="Bad Request Paper")
+
+    def fake_urlopen(request, timeout=None):
+        raise HTTPError(
+            request.full_url,
+            400,
+            "Bad Request",
+            hdrs=None,
+            fp=io.BytesIO(b"bad request"),
+        )
+
+    monkeypatch.setattr(publisher, "urlopen", fake_urlopen)
+
+    with pytest.raises(RuntimeError, match="400"):
+        publish_batch(config, [paper], generated_at="2026-04-15T09:30:00+08:00")
+
+
 def test_publish_batch_raises_after_network_retries(config, monkeypatch):
     with open_dict(config):
         config.nanoclaw.enabled = True
