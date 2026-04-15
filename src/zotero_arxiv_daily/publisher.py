@@ -1,4 +1,5 @@
 import json
+import socket
 from time import sleep
 from typing import Any
 
@@ -73,7 +74,6 @@ def publish_batch(config: DictConfig, papers: list[Paper], *, generated_at: str)
     max_retries = int(config.nanoclaw.max_retries)
     timeout = int(config.nanoclaw.timeout)
 
-    last_error: Exception | None = None
     for attempt in range(max_retries + 1):
         request = _make_request(config, payload)
         try:
@@ -117,9 +117,27 @@ def publish_batch(config: DictConfig, papers: list[Paper], *, generated_at: str)
                 max_retries + 1,
             )
             raise RuntimeError(f"nanoclaw publish failed with HTTP {error.code}: {body_text}")
+        except socket.timeout as error:
+            if attempt < max_retries:
+                logger.warning(
+                    "nanoclaw publish failed for batch {} at {} with response timeout on attempt {}/{}; retrying",
+                    batch_id,
+                    endpoint,
+                    attempt + 1,
+                    max_retries + 1,
+                )
+                sleep(1)
+                continue
+            logger.error(
+                "nanoclaw publish failed for batch {} at {} with response timeout after {}/{} attempts",
+                batch_id,
+                endpoint,
+                attempt + 1,
+                max_retries + 1,
+            )
+            raise RuntimeError(f"nanoclaw publish failed after network retries: {error}") from error
         except URLError as error:
             if attempt < max_retries:
-                last_error = error
                 logger.warning(
                     "nanoclaw publish failed for batch {} at {} with network error on attempt {}/{}; retrying",
                     batch_id,
@@ -137,8 +155,3 @@ def publish_batch(config: DictConfig, papers: list[Paper], *, generated_at: str)
                 max_retries + 1,
             )
             raise RuntimeError(f"nanoclaw publish failed after network retries: {error}") from error
-
-    if last_error is not None:
-        logger.error("nanoclaw publish failed for batch {} at {}", batch_id, endpoint)
-        raise RuntimeError(f"nanoclaw publish failed: {last_error}")
-    raise RuntimeError("nanoclaw publish failed")

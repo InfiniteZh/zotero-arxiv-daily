@@ -1,5 +1,6 @@
 import io
 import json
+import socket
 from urllib.error import HTTPError, URLError
 
 import pytest
@@ -222,4 +223,45 @@ def test_publish_batch_raises_after_network_retries(config, monkeypatch):
     with pytest.raises(RuntimeError):
         publish_batch(config, [paper], generated_at="2026-04-15T09:30:00+08:00")
 
+    assert attempts == 3
+
+
+def test_publish_batch_retries_response_read_timeout(config, monkeypatch):
+    with open_dict(config):
+        config.nanoclaw.enabled = True
+        config.nanoclaw.endpoint = "https://nanoclaw.example/api/paper-digests"
+        config.nanoclaw.token = "secret-token"
+        config.nanoclaw.max_retries = 2
+        config.nanoclaw.timeout = 17
+
+    paper = make_sample_paper(title="Slow Response Paper")
+    attempts = 0
+
+    def fake_sleep(seconds):
+        return None
+
+    def fake_urlopen(request, timeout=None):
+        nonlocal attempts
+        attempts += 1
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                if attempts < 3:
+                    raise socket.timeout("timed out while reading response")
+                return json.dumps({"status": "duplicate", "batch_id": "2026-04-15-arxiv-top10"}).encode("utf-8")
+
+        return FakeResponse()
+
+    monkeypatch.setattr(publisher, "urlopen", fake_urlopen)
+    monkeypatch.setattr(publisher, "sleep", fake_sleep)
+
+    response = publish_batch(config, [paper], generated_at="2026-04-15T09:30:00+08:00")
+
+    assert response["status"] == "duplicate"
     assert attempts == 3
