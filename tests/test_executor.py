@@ -1,6 +1,7 @@
 """Tests for zotero_arxiv_daily.executor: normalize_path_patterns, filter_corpus, fetch_zotero_corpus, E2E."""
 
 from datetime import datetime
+from types import SimpleNamespace
 
 import pytest
 from omegaconf import OmegaConf
@@ -207,6 +208,132 @@ def test_run_end_to_end(config, monkeypatch):
     assert len(sent) == 1, "Email should have been sent"
     _, _, email_body = sent[0]
     assert "text/html" in email_body
+
+
+def test_run_nanoclaw_mode_publishes_ranked_batch(config, monkeypatch):
+    from omegaconf import open_dict
+
+    from tests.canned_responses import make_sample_paper, make_stub_zotero_client
+
+    with open_dict(config):
+        config.delivery.mode = "nanoclaw"
+        config.nanoclaw.enabled = True
+        config.executor.source = ["arxiv"]
+        config.executor.reranker = "api"
+        config.executor.max_paper_num = 1
+
+    stub_zot = make_stub_zotero_client(
+        items=[
+            {
+                "data": {
+                    "title": "Corpus Keep",
+                    "abstractNote": "Keep corpus abstract.",
+                    "dateAdded": "2026-03-01T00:00:00Z",
+                    "collections": ["COL1"],
+                }
+            }
+        ]
+    )
+    monkeypatch.setattr("zotero_arxiv_daily.executor.zotero.Zotero", lambda *a, **kw: stub_zot)
+
+    def make_embedding_client():
+        def embeddings_create(**kwargs):
+            vectors = []
+            for text in kwargs.get("input", []):
+                normalized = text.lower()
+                if "keep" in normalized:
+                    vectors.append(SimpleNamespace(embedding=[1.0, 0.0]))
+                else:
+                    vectors.append(SimpleNamespace(embedding=[0.0, 1.0]))
+            return SimpleNamespace(data=vectors)
+
+        return SimpleNamespace(
+            chat=SimpleNamespace(
+                completions=SimpleNamespace(create=lambda **kwargs: SimpleNamespace(choices=[])),
+            ),
+            embeddings=SimpleNamespace(create=embeddings_create),
+        )
+
+    stub_client = make_embedding_client()
+    monkeypatch.setattr("zotero_arxiv_daily.executor.OpenAI", lambda **kw: stub_client)
+    monkeypatch.setattr("zotero_arxiv_daily.reranker.api.OpenAI", lambda **kw: stub_client)
+
+    import zotero_arxiv_daily.retriever.arxiv_retriever  # noqa: F401
+
+    from zotero_arxiv_daily.retriever.base import registered_retrievers
+
+    retrieved = [
+        make_sample_paper(title="Keep Me", abstract="Keep this candidate abstract.", score=None),
+        make_sample_paper(title="Drop Me", abstract="Drop this candidate abstract.", score=None),
+    ]
+    monkeypatch.setattr(registered_retrievers["arxiv"], "retrieve_papers", lambda self: retrieved)
+    monkeypatch.setattr("zotero_arxiv_daily.retriever.base.sleep", lambda _: None)
+
+    published = {}
+
+    def fake_publish_batch(config, papers, *, generated_at):
+        published["titles"] = [paper.title for paper in papers]
+        published["generated_at"] = generated_at
+        return {"ok": True, "status": "accepted"}
+
+    monkeypatch.setattr("zotero_arxiv_daily.executor.publish_batch", fake_publish_batch)
+    monkeypatch.setattr("zotero_arxiv_daily.executor.render_email", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("render_email should not be called")))
+    monkeypatch.setattr("zotero_arxiv_daily.executor.send_email", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("send_email should not be called")))
+
+    executor = Executor(config)
+    executor.run()
+
+    assert published["titles"] == ["Keep Me"]
+    assert published["generated_at"]
+
+
+def test_run_email_mode_keeps_legacy_email_flow(config, monkeypatch):
+    import smtplib
+
+    from omegaconf import open_dict
+
+    from tests.canned_responses import (
+        make_sample_paper,
+        make_stub_openai_client,
+        make_stub_smtp,
+        make_stub_zotero_client,
+    )
+
+    with open_dict(config):
+        config.delivery.mode = "email"
+        config.executor.source = ["arxiv"]
+        config.executor.reranker = "api"
+        config.executor.send_empty = False
+
+    stub_zot = make_stub_zotero_client()
+    monkeypatch.setattr("zotero_arxiv_daily.executor.zotero.Zotero", lambda *a, **kw: stub_zot)
+
+    stub_client = make_stub_openai_client()
+    monkeypatch.setattr("zotero_arxiv_daily.executor.OpenAI", lambda **kw: stub_client)
+    monkeypatch.setattr("zotero_arxiv_daily.reranker.api.OpenAI", lambda **kw: stub_client)
+
+    import zotero_arxiv_daily.retriever.arxiv_retriever  # noqa: F401
+
+    from zotero_arxiv_daily.retriever.base import registered_retrievers
+
+    retrieved = [
+        make_sample_paper(title="Email Mode Paper 1", score=None),
+        make_sample_paper(title="Email Mode Paper 2", score=None),
+    ]
+    monkeypatch.setattr(registered_retrievers["arxiv"], "retrieve_papers", lambda self: retrieved)
+
+    sent = []
+    monkeypatch.setattr(smtplib, "SMTP", make_stub_smtp(sent))
+    monkeypatch.setattr("zotero_arxiv_daily.retriever.base.sleep", lambda _: None)
+    monkeypatch.setattr(
+        "zotero_arxiv_daily.executor.publish_batch",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("publish_batch should not be called")),
+    )
+
+    executor = Executor(config)
+    executor.run()
+
+    assert len(sent) == 1, "Email should be sent through legacy flow"
 
 
 def test_run_no_papers_send_empty_false(config, monkeypatch):

@@ -9,6 +9,7 @@ from datetime import datetime
 from .reranker import get_reranker_cls
 from .construct_email import render_email
 from .utils import send_email
+from .publisher import publish_batch
 from openai import OpenAI
 from tqdm import tqdm
 
@@ -111,13 +112,30 @@ class Executor:
             logger.info("Reranking papers...")
             reranked_papers = self.reranker.rerank(all_papers, corpus)
             reranked_papers = reranked_papers[:self.config.executor.max_paper_num]
+        elif not self.config.executor.send_empty:
+            logger.info("No new papers found. No email will be sent.")
+            return
+
+        delivery_mode = self.config.delivery.mode
+        if delivery_mode == "nanoclaw":
+            if len(reranked_papers) == 0:
+                logger.info("No papers selected for nanoclaw publishing.")
+                return
+            generated_at = datetime.now().astimezone().isoformat(timespec="seconds")
+            logger.info(
+                "Publishing {} papers to nanoclaw at {}",
+                len(reranked_papers),
+                generated_at,
+            )
+            publish_batch(self.config, reranked_papers, generated_at=generated_at)
+            logger.info("Nanoclaw batch published successfully")
+            return
+
+        if len(all_papers) > 0:
             logger.info("Generating TLDR and affiliations...")
             for p in tqdm(reranked_papers):
                 p.generate_tldr(self.openai_client, self.config.llm)
                 p.generate_affiliations(self.openai_client, self.config.llm)
-        elif not self.config.executor.send_empty:
-            logger.info("No new papers found. No email will be sent.")
-            return
         logger.info("Sending email...")
         email_content = render_email(reranked_papers)
         send_email(self.config, email_content)
