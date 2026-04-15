@@ -287,6 +287,46 @@ def test_run_nanoclaw_mode_publishes_ranked_batch(config, monkeypatch):
     assert published["generated_at"]
 
 
+def test_run_nanoclaw_mode_no_papers_uses_nanoclaw_empty_path(config, monkeypatch):
+    from omegaconf import open_dict
+
+    from tests.canned_responses import make_stub_openai_client, make_stub_zotero_client
+
+    with open_dict(config):
+        config.delivery.mode = "nanoclaw"
+        config.nanoclaw.enabled = True
+        config.executor.source = ["arxiv"]
+        config.executor.reranker = "api"
+        config.executor.send_empty = False
+
+    stub_zot = make_stub_zotero_client()
+    monkeypatch.setattr("zotero_arxiv_daily.executor.zotero.Zotero", lambda *a, **kw: stub_zot)
+
+    stub_client = make_stub_openai_client()
+    monkeypatch.setattr("zotero_arxiv_daily.executor.OpenAI", lambda **kw: stub_client)
+    monkeypatch.setattr("zotero_arxiv_daily.reranker.api.OpenAI", lambda **kw: stub_client)
+
+    import zotero_arxiv_daily.retriever.arxiv_retriever  # noqa: F401
+
+    from zotero_arxiv_daily.retriever.base import registered_retrievers
+
+    monkeypatch.setattr(registered_retrievers["arxiv"], "retrieve_papers", lambda self: [])
+    monkeypatch.setattr("zotero_arxiv_daily.retriever.base.sleep", lambda _: None)
+
+    messages = []
+
+    def capture_info(message, *args, **kwargs):
+        messages.append(message)
+
+    monkeypatch.setattr("zotero_arxiv_daily.executor.logger.info", capture_info)
+
+    executor = Executor(config)
+    executor.run()
+
+    assert "No papers selected for nanoclaw publishing." in messages
+    assert "No new papers found. No email will be sent." not in messages
+
+
 def test_run_email_mode_keeps_legacy_email_flow(config, monkeypatch):
     import smtplib
 

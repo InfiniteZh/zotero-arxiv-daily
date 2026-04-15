@@ -112,9 +112,6 @@ class Executor:
             logger.info("Reranking papers...")
             reranked_papers = self.reranker.rerank(all_papers, corpus)
             reranked_papers = reranked_papers[:self.config.executor.max_paper_num]
-        elif not self.config.executor.send_empty:
-            logger.info("No new papers found. No email will be sent.")
-            return
 
         delivery_mode = self.config.delivery.mode
         if delivery_mode == "nanoclaw":
@@ -129,6 +126,10 @@ class Executor:
             )
             publish_batch(self.config, reranked_papers, generated_at=generated_at)
             logger.info("Nanoclaw batch published successfully")
+            return
+
+        if len(all_papers) == 0 and not self.config.executor.send_empty:
+            logger.info("No new papers found. No email will be sent.")
             return
 
         if len(all_papers) > 0:
