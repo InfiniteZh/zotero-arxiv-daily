@@ -6,7 +6,7 @@ import pytest
 from omegaconf import open_dict
 
 from tests.canned_responses import make_sample_paper
-from zotero_arxiv_daily.publisher import build_batch_payload
+from zotero_arxiv_daily.publisher import build_batch_payload, publish_batch
 from zotero_arxiv_daily import publisher
 
 
@@ -85,13 +85,30 @@ def test_publish_batch_accepts_202_response(config, monkeypatch):
         captured["authorization"] = request.get_header("Authorization")
         captured["timeout"] = timeout
         captured["body"] = json.loads(request.data.decode("utf-8"))
-        return io.BytesIO(json.dumps({"status": "accepted", "batch_id": "2026-04-15-arxiv-top10"}).encode("utf-8"))
+
+        class FakeResponse:
+            status = 202
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return json.dumps(
+                    {"status": "accepted", "batch_id": "2026-04-15-arxiv-top10"}
+                ).encode("utf-8")
+
+        captured["status"] = 202
+        return FakeResponse()
 
     monkeypatch.setattr(publisher, "urlopen", fake_urlopen)
 
-    response = publisher.publish_batch(config, [paper], generated_at="2026-04-15T09:30:00+08:00")
+    response = publish_batch(config, [paper], generated_at="2026-04-15T09:30:00+08:00")
 
     assert response["status"] == "accepted"
+    assert captured["status"] == 202
     assert captured["url"] == "https://nanoclaw.example/api/paper-digests"
     assert captured["authorization"] == "Bearer secret-token"
     assert captured["timeout"] == 17
@@ -124,14 +141,14 @@ def test_publish_batch_retries_once_on_500_then_succeeds(config, monkeypatch):
                 hdrs=None,
                 fp=io.BytesIO(b"server failed"),
             )
-        return io.BytesIO(json.dumps({"status": "accepted", "batch_id": "2026-04-15-arxiv-top10"}).encode("utf-8"))
+        return io.BytesIO(json.dumps({"status": "duplicate", "batch_id": "2026-04-15-arxiv-top10"}).encode("utf-8"))
 
     monkeypatch.setattr(publisher, "urlopen", fake_urlopen)
     monkeypatch.setattr(publisher, "sleep", fake_sleep)
 
-    response = publisher.publish_batch(config, [paper], generated_at="2026-04-15T09:30:00+08:00")
+    response = publish_batch(config, [paper], generated_at="2026-04-15T09:30:00+08:00")
 
-    assert response["status"] == "accepted"
+    assert response["status"] == "duplicate"
     assert attempts == 2
 
 
@@ -155,7 +172,7 @@ def test_publish_batch_fails_fast_on_401(config, monkeypatch):
     monkeypatch.setattr(publisher, "urlopen", fake_urlopen)
 
     with pytest.raises(RuntimeError, match="401"):
-        publisher.publish_batch(config, [paper], generated_at="2026-04-15T09:30:00+08:00")
+        publish_batch(config, [paper], generated_at="2026-04-15T09:30:00+08:00")
 
 
 def test_publish_batch_raises_after_network_retries(config, monkeypatch):
@@ -180,6 +197,6 @@ def test_publish_batch_raises_after_network_retries(config, monkeypatch):
     monkeypatch.setattr(publisher, "sleep", fake_sleep)
 
     with pytest.raises(RuntimeError):
-        publisher.publish_batch(config, [paper], generated_at="2026-04-15T09:30:00+08:00")
+        publish_batch(config, [paper], generated_at="2026-04-15T09:30:00+08:00")
 
     assert attempts == 3
