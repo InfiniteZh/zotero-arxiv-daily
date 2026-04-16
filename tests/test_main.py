@@ -5,8 +5,13 @@ because config_path resolution depends on the calling context.
 We test the inner logic by calling main's body with a composed config.
 """
 
+from pathlib import Path
+
 import pytest
+from hydra import compose, initialize_config_dir
 from hydra.core.global_hydra import GlobalHydra
+
+_CONFIG_DIR = str(Path(__file__).resolve().parent.parent / "config")
 
 
 @pytest.fixture(autouse=True)
@@ -59,3 +64,45 @@ def test_main_debug_logging(config, monkeypatch):
 
     main_mod.main.__wrapped__(config)
     # If we get here without error, the debug path executed successfully
+
+
+def test_custom_config_can_decode_zotero_path_filters_from_env(monkeypatch):
+    """Verify Hydra composes Zotero path filters from env-backed config."""
+    monkeypatch.setenv("ZOTERO_INCLUDE_PATH", '["Security","Security/**"]')
+    monkeypatch.setenv("ZOTERO_IGNORE_PATH", '["archive/**"]')
+
+    GlobalHydra.instance().clear()
+    with initialize_config_dir(config_dir=_CONFIG_DIR, version_base=None):
+        cfg = compose(
+            config_name="default",
+            overrides=[
+                "zotero.user_id=000000",
+                "zotero.api_key=fake-zotero-key",
+                "email.sender=test@example.com",
+                "email.receiver=test@example.com",
+                "email.smtp_server=localhost",
+                "email.smtp_port=1025",
+                "email.sender_password=test",
+                "delivery.mode=email",
+                "nanoclaw.enabled=false",
+                "nanoclaw.endpoint=http://localhost:3000/api/paper-digests",
+                "nanoclaw.token=test-nanoclaw-token",
+                "nanoclaw.timeout=30",
+                "nanoclaw.include_full_text=true",
+                "nanoclaw.max_retries=3",
+                "llm.api.key=sk-fake",
+                "llm.api.base_url=http://localhost:30000/v1",
+                "llm.generation_kwargs.model=gpt-4o-mini",
+                "reranker.api.key=sk-fake",
+                "reranker.api.base_url=http://localhost:30000/v1",
+                "reranker.api.model=text-embedding-3-large",
+                "source.arxiv.category=[cs.AI,cs.CV]",
+                "executor.source=[arxiv]",
+                "executor.reranker=api",
+                "executor.debug=false",
+                "executor.send_empty=false",
+            ],
+        )
+
+    assert cfg.zotero.include_path == ["Security", "Security/**"]
+    assert cfg.zotero.ignore_path == ["archive/**"]
