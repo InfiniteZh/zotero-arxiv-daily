@@ -103,19 +103,20 @@ executor:
 ```
 Set `source.arxiv.include_cross_list: true` if you want cross-listed papers included.
 
-## NanoClaw Delivery
+### NanoClaw Delivery
 
 This fork can hand off reranked papers to NanoClaw instead of generating email directly.
 
-Required variables:
-- `DELIVERY_MODE=nanoclaw`
-- `NANOCLAW_ENDPOINT=http://localhost:3000/api/paper-digests`
-- `NANOCLAW_TOKEN=...`
-
-Optional variables:
+Supported env vars:
+- `DELIVERY_MODE=nanoclaw` (default)
+- `NANOCLAW_ENABLED=true` (default)
+- `NANOCLAW_ENDPOINT=http://localhost:3000/api/paper-digests` (default)
 - `NANOCLAW_TIMEOUT=30`
 - `NANOCLAW_INCLUDE_FULL_TEXT=true`
 - `NANOCLAW_MAX_RETRIES=3`
+
+Required for authenticated delivery:
+- `NANOCLAW_TOKEN=...`
 
 The number of papers sent to NanoClaw is still controlled by `executor.max_paper_num`.
 > [!NOTE]
