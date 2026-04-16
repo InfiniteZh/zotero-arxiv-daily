@@ -102,7 +102,23 @@ executor:
   source: ['arxiv']
 ```
 Set `source.arxiv.include_cross_list: true` if you want cross-listed papers included.
->[!NOTE]
+
+## NanoClaw Delivery
+
+This fork can hand off reranked papers to NanoClaw instead of generating email directly.
+
+Required variables:
+- `DELIVERY_MODE=nanoclaw`
+- `NANOCLAW_ENDPOINT=http://localhost:3000/api/paper-digests`
+- `NANOCLAW_TOKEN=...`
+
+Optional variables:
+- `NANOCLAW_TIMEOUT=30`
+- `NANOCLAW_INCLUDE_FULL_TEXT=true`
+- `NANOCLAW_MAX_RETRIES=3`
+
+The number of papers sent to NanoClaw is still controlled by `executor.max_paper_num`.
+> [!NOTE]
 > `${oc.env:XXX,yyy}` means the value of the environment variable `XXX`. If the variable is not set, the default value `yyy` will be used.
 
 Here is the full configuration, `???` means the value must be filled in:
