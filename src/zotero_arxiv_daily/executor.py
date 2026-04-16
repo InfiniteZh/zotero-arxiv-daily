@@ -127,17 +127,22 @@ class Executor:
             publish_batch(self.config, reranked_papers, generated_at=generated_at)
             logger.info("Nanoclaw batch published successfully")
             return
+        elif delivery_mode == "email":
+            if len(all_papers) == 0 and not self.config.executor.send_empty:
+                logger.info("No new papers found. No email will be sent.")
+                return
 
-        if len(all_papers) == 0 and not self.config.executor.send_empty:
-            logger.info("No new papers found. No email will be sent.")
+            if len(all_papers) > 0:
+                logger.info("Generating TLDR and affiliations...")
+                for p in tqdm(reranked_papers):
+                    p.generate_tldr(self.openai_client, self.config.llm)
+                    p.generate_affiliations(self.openai_client, self.config.llm)
+            logger.info("Sending email...")
+            email_content = render_email(reranked_papers)
+            send_email(self.config, email_content)
+            logger.info("Email sent successfully")
             return
-
-        if len(all_papers) > 0:
-            logger.info("Generating TLDR and affiliations...")
-            for p in tqdm(reranked_papers):
-                p.generate_tldr(self.openai_client, self.config.llm)
-                p.generate_affiliations(self.openai_client, self.config.llm)
-        logger.info("Sending email...")
-        email_content = render_email(reranked_papers)
-        send_email(self.config, email_content)
-        logger.info("Email sent successfully")
+        else:
+            raise ValueError(
+                f"Unsupported delivery.mode: {delivery_mode!r}. Expected 'nanoclaw' or 'email'."
+            )

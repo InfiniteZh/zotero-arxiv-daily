@@ -287,10 +287,10 @@ def test_run_nanoclaw_mode_publishes_ranked_batch(config, monkeypatch):
     assert published["generated_at"]
 
 
-def test_run_nanoclaw_mode_no_papers_uses_nanoclaw_empty_path(config, monkeypatch):
+def test_run_nanoclaw_mode_empty_ranked_batch_uses_nanoclaw_path(config, monkeypatch):
     from omegaconf import open_dict
 
-    from tests.canned_responses import make_stub_openai_client, make_stub_zotero_client
+    from tests.canned_responses import make_sample_paper, make_stub_openai_client, make_stub_zotero_client
 
     with open_dict(config):
         config.delivery.mode = "nanoclaw"
@@ -310,7 +310,8 @@ def test_run_nanoclaw_mode_no_papers_uses_nanoclaw_empty_path(config, monkeypatc
 
     from zotero_arxiv_daily.retriever.base import registered_retrievers
 
-    monkeypatch.setattr(registered_retrievers["arxiv"], "retrieve_papers", lambda self: [])
+    retrieved = [make_sample_paper(title="Rank Me", abstract="Rank me abstract.", score=None)]
+    monkeypatch.setattr(registered_retrievers["arxiv"], "retrieve_papers", lambda self: retrieved)
     monkeypatch.setattr("zotero_arxiv_daily.retriever.base.sleep", lambda _: None)
 
     messages = []
@@ -319,10 +320,31 @@ def test_run_nanoclaw_mode_no_papers_uses_nanoclaw_empty_path(config, monkeypatc
         messages.append(message)
 
     monkeypatch.setattr("zotero_arxiv_daily.executor.logger.info", capture_info)
+    monkeypatch.setattr(
+        "zotero_arxiv_daily.executor.publish_batch",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("publish_batch should not be called")),
+    )
+    monkeypatch.setattr(
+        "zotero_arxiv_daily.executor.render_email",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("render_email should not be called")),
+    )
+    monkeypatch.setattr(
+        "zotero_arxiv_daily.executor.send_email",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("send_email should not be called")),
+    )
+
+    rerank_calls = {}
+
+    def fake_rerank(papers, corpus):
+        rerank_calls["count"] = len(papers)
+        return []
 
     executor = Executor(config)
+    monkeypatch.setattr(executor.reranker, "rerank", fake_rerank)
+
     executor.run()
 
+    assert rerank_calls["count"] == 1
     assert "No papers selected for nanoclaw publishing." in messages
     assert "No new papers found. No email will be sent." not in messages
 
@@ -335,7 +357,6 @@ def test_run_email_mode_keeps_legacy_email_flow(config, monkeypatch):
     from tests.canned_responses import (
         make_sample_paper,
         make_stub_openai_client,
-        make_stub_smtp,
         make_stub_zotero_client,
     )
 
@@ -362,8 +383,41 @@ def test_run_email_mode_keeps_legacy_email_flow(config, monkeypatch):
     ]
     monkeypatch.setattr(registered_retrievers["arxiv"], "retrieve_papers", lambda self: retrieved)
 
-    sent = []
-    monkeypatch.setattr(smtplib, "SMTP", make_stub_smtp(sent))
+    events = []
+
+    for paper in retrieved:
+        title = paper.title
+
+        def generate_tldr(openai_client, llm_params, *, _title=title, _paper=paper):
+            events.append(f"tldr:{_title}")
+            _paper.tldr = f"TLDR for {_title}"
+            return _paper.tldr
+
+        def generate_affiliations(openai_client, llm_params, *, _title=title, _paper=paper):
+            events.append(f"affiliations:{_title}")
+            _paper.affiliations = [f"Affiliation for {_title}"]
+            return _paper.affiliations
+
+        paper.generate_tldr = generate_tldr
+        paper.generate_affiliations = generate_affiliations
+
+    class SpySMTP:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def starttls(self):
+            pass
+
+        def login(self, user, password):
+            pass
+
+        def sendmail(self, sender, recipients, msg):
+            events.append("send_email")
+
+        def quit(self):
+            pass
+
+    monkeypatch.setattr(smtplib, "SMTP", SpySMTP)
     monkeypatch.setattr("zotero_arxiv_daily.retriever.base.sleep", lambda _: None)
     monkeypatch.setattr(
         "zotero_arxiv_daily.executor.publish_batch",
@@ -373,7 +427,13 @@ def test_run_email_mode_keeps_legacy_email_flow(config, monkeypatch):
     executor = Executor(config)
     executor.run()
 
-    assert len(sent) == 1, "Email should be sent through legacy flow"
+    assert events == [
+        "tldr:Email Mode Paper 1",
+        "affiliations:Email Mode Paper 1",
+        "tldr:Email Mode Paper 2",
+        "affiliations:Email Mode Paper 2",
+        "send_email",
+    ]
 
 
 def test_run_no_papers_send_empty_false(config, monkeypatch):
