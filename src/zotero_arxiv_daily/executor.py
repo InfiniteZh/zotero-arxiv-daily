@@ -10,6 +10,7 @@ from .reranker import get_reranker_cls
 from .construct_email import render_email
 from .utils import send_email
 from .publisher import publish_batch
+from .feishu_publisher import publish_to_feishu
 from openai import OpenAI
 from tqdm import tqdm
 
@@ -127,6 +128,18 @@ class Executor:
             publish_batch(self.config, reranked_papers, generated_at=generated_at)
             logger.info("Nanoclaw batch published successfully")
             return
+        elif delivery_mode == "feishu":
+            if len(reranked_papers) == 0:
+                logger.info("No papers selected for Feishu publishing.")
+                return
+            generated_at = datetime.now().astimezone().isoformat(timespec="seconds")
+            logger.info(
+                "Publishing {} papers to Feishu",
+                len(reranked_papers),
+            )
+            publish_to_feishu(self.config, reranked_papers, generated_at=generated_at)
+            logger.info("Feishu card published successfully")
+            return
         elif delivery_mode == "email":
             if len(all_papers) == 0 and not self.config.executor.send_empty:
                 logger.info("No new papers found. No email will be sent.")
@@ -144,5 +157,5 @@ class Executor:
             return
         else:
             raise ValueError(
-                f"Unsupported delivery.mode: {delivery_mode!r}. Expected 'nanoclaw' or 'email'."
+                f"Unsupported delivery.mode: {delivery_mode!r}. Expected 'nanoclaw', 'email', or 'feishu'."
             )

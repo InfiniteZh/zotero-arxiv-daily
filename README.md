@@ -29,13 +29,13 @@
 
 > Track new scientific researches of your interest by just forking (and staring) this repo!😊
 
-*Zotero-arXiv-Daily* finds arxiv papers that may attract you based on the context of your Zotero library, and then sends the result to your mailbox📮. It can be deployed as Github Action Workflow with **zero cost**, **no installation**, and **few configuration** of Github Action environment variables for daily **automatic** delivery.
+*Zotero-arXiv-Daily* finds arxiv papers that may attract you based on the context of your Zotero library, and then sends the result to Feishu cards by default. It can be deployed as Github Action Workflow with **zero cost**, **no installation**, and **few configuration** of Github Action environment variables for daily **automatic** delivery.
 
 ## ✨ Features
 - Totally free! All the calculation can be done in the Github Action runner locally within its quota (for public repo).
 - AI-generated TL;DR for you to quickly pick up target papers.
 - Affiliations of the paper are resolved and presented.
-- Links of PDF and code implementation (if any) presented in the e-mail.
+- Links of abstract and PDF presented in Feishu cards.
 - List of papers sorted by relevance with your recent research interest.
 - Fast deployment via fork this repo and set environment variables in the Github Action Page.
 - Support LLM API for generating TL;DR of papers.
@@ -56,15 +56,13 @@
 2. Set Github Action environment variables.
 ![secrets](./assets/secrets.png)
 
-Below are all the secrets you need to set. They are invisible to anyone including you once they are set, for security.
+Below are the core secrets you need for the default Feishu flow. They are invisible to anyone including you once they are set, for security.
 
 | Key |Description | Example |
 | :---  | :---  | :--- |
 | ZOTERO_ID  | User ID of your Zotero account. **User ID is not your username, but a sequence of numbers**Get your ID from [here](https://www.zotero.org/settings/security). You can find it at the position shown in this [screenshot](https://github.com/TideDra/zotero-arxiv-daily/blob/main/assets/userid.png). | 12345678  |
 | ZOTERO_KEY | An Zotero API key with read access. Get a key from [here](https://www.zotero.org/settings/security).  | AB5tZ877P2j7Sm2Mragq041H   |
-| SENDER | The email account of the SMTP server that sends you email. | abc@qq.com |
-| SENDER_PASSWORD | The password of the sender account. Note that it's not necessarily the password for logging in the e-mail client, but the authentication code for SMTP service. Ask your email provider for this.   | abcdefghijklmn |
-| RECEIVER | The e-mail address that receives the paper list. | abc@outlook.com |
+| FEISHU_WEBHOOK_URL | Webhook URL of your Feishu bot for interactive card delivery. | https://open.feishu.cn/open-apis/bot/v2/hook/xxx |
 | OPENAI_API_KEY | API Key when using the API to access LLMs. You can get FREE API for using advanced open source LLMs in [SiliconFlow](https://cloud.siliconflow.cn/i/b3XhBRAm). | sk-xxx |
 | OPENAI_API_BASE | API URL when using the API to access LLMs. | https://api.siliconflow.cn/v1 |
 
@@ -78,12 +76,15 @@ zotero:
   api_key: ${oc.env:ZOTERO_KEY}
   include_path: null # Or e.g. ["2026/survey/**", "2026/reading-group/**"]
 
-email:
-  sender: ${oc.env:SENDER}
-  receiver: ${oc.env:RECEIVER}
-  smtp_server: smtp.qq.com
-  smtp_port: 465
-  sender_password: ${oc.env:SENDER_PASSWORD}
+delivery:
+  mode: ${oc.env:DELIVERY_MODE,feishu}
+
+feishu:
+  enabled: ${oc.decode:${oc.env:FEISHU_ENABLED,true}}
+  webhook_url: ${oc.env:FEISHU_WEBHOOK_URL}
+  bot_name: ${oc.env:FEISHU_BOT_NAME,arXiv Daily Bot}
+  timeout: ${oc.decode:${oc.env:FEISHU_TIMEOUT,30}}
+  max_retries: ${oc.decode:${oc.env:FEISHU_MAX_RETRIES,3}}
 
 llm:
   api:
@@ -98,27 +99,48 @@ source:
     include_cross_list: false # Set to true to include arXiv cross-list papers in these categories.
 
 executor:
-  debug: ${oc.env:DEBUG,null}
+  debug: ${oc.decode:${oc.env:DEBUG,false}}
   source: ['arxiv']
 ```
 Set `source.arxiv.include_cross_list: true` if you want cross-listed papers included.
 
-### NanoClaw Delivery
+### Feishu Card Delivery
 
-This fork can hand off reranked papers to NanoClaw instead of generating email directly.
+This fork now delivers reranked papers to Feishu cards by default.
 
 Supported env vars:
-- `DELIVERY_MODE=nanoclaw` (default)
-- `NANOCLAW_ENABLED=true` (default)
-- `NANOCLAW_ENDPOINT=http://localhost:3000/api/paper-digests` (default)
+- `DELIVERY_MODE=feishu` (default)
+- `FEISHU_ENABLED=true` (default)
+- `FEISHU_WEBHOOK_URL=https://open.feishu.cn/open-apis/bot/v2/hook/...`
+- `FEISHU_BOT_NAME=arXiv Daily Bot`
+- `FEISHU_TIMEOUT=30`
+- `FEISHU_MAX_RETRIES=3`
+
+Cards are sent as webhook-based interactive cards. The card body uses Feishu `lark_md` rich text, including:
+- ranked title
+- source tag
+- score
+- authors
+- summary
+- abstract/PDF links
+
+The number of papers sent to Feishu is still controlled by `executor.max_paper_num`.
+
+### Optional NanoClaw Delivery
+
+NanoClaw remains supported as an optional backend.
+
+Supported env vars:
+- `DELIVERY_MODE=nanoclaw`
+- `NANOCLAW_ENABLED=true`
+- `NANOCLAW_ENDPOINT=http://localhost:3000/api/paper-digests`
 - `NANOCLAW_TIMEOUT=30`
 - `NANOCLAW_INCLUDE_FULL_TEXT=true`
 - `NANOCLAW_MAX_RETRIES=3`
-
-Required for authenticated delivery:
 - `NANOCLAW_TOKEN=...`
 
-The number of papers sent to NanoClaw is still controlled by `executor.max_paper_num`.
+> [!NOTE]
+> When running inside Docker, use `host.docker.internal` instead of `localhost` if NanoClaw is running on the host machine.
 > [!NOTE]
 > `${oc.env:XXX,yyy}` means the value of the environment variable `XXX`. If the variable is not set, the default value `yyy` will be used.
 
@@ -144,6 +166,24 @@ email:
   smtp_server: ??? # The SMTP server that sends the email. Ask your email provider (Gmail, QQ, Outlook, ...) for its SMTP server. Example: smtp.qq.com
   smtp_port: ??? # The port of SMTP server. Example: 465
   sender_password: ??? # The password of the sender account. Note that it's not necessarily the password for logging in the e-mail client, but the authentication code for SMTP service. Ask your email provider for this. Example: abcdefghijklmn
+
+delivery:
+  mode: feishu # Delivery backend. Example: feishu, nanoclaw, or email
+
+feishu:
+  enabled: true # Whether Feishu publishing is enabled. Example: true
+  webhook_url: ??? # Feishu webhook URL for sending cards. Example: https://open.feishu.cn/open-apis/bot/v2/hook/xxx
+  bot_name: arXiv Daily Bot # Name of the bot displayed in Feishu. Example: arXiv Daily Bot
+  timeout: 30 # Request timeout in seconds. Example: 30
+  max_retries: 3 # Number of retries for network failures. Example: 3
+
+nanoclaw:
+  enabled: false # Whether NanoClaw handoff is enabled. Example: true
+  endpoint: null # NanoClaw batch endpoint. Example: http://host.docker.internal:3000/api/paper-digests
+  token: null # NanoClaw bearer token. Example: secret-token
+  timeout: 30 # Request timeout in seconds. Example: 30
+  include_full_text: true # Whether to include extracted full text in the payload. Example: true
+  max_retries: 3 # Number of retries for 5xx and network failures. Example: 3
 
 llm:
   api:
@@ -182,7 +222,7 @@ That's all! Now you can test the workflow by manually triggering it:
 > [!NOTE]
 > The Test-Workflow Action is the debug version of the main workflow (Send-emails-daily), which always retrieve 5 arxiv papers regardless of the date. While the main workflow will be automatically triggered everyday and retrieve new papers released yesterday. There is no new arxiv paper at weekends and holiday, in which case you may see "No new papers found" in the log of main workflow.
 
-Then check the log and the receiver email after it finishes.
+Then check the log and the target Feishu group after it finishes.
 
 By default, the main workflow runs on 22:00 UTC everyday. You can change this time by editting the workflow config `.github/workflows/main.yml`.
 
@@ -195,6 +235,53 @@ Supported by [uv](https://github.com/astral-sh/uv), this workflow can easily run
 cd zotero-arxiv-daily
 uv run main.py
 ```
+
+### Docker Deployment
+
+You can also run this application in Docker, which is useful for self-hosting or running on a server.
+
+#### Prerequisites
+
+- Docker and Docker Compose installed
+- A Feishu webhook URL (for Feishu card delivery)
+
+#### Setup
+
+1. Copy the environment template and configure your settings:
+```bash
+cp .env.example .env
+# Edit .env with your configuration
+```
+
+2. Configure `config/custom.yaml` for your needs, or use environment variables directly.
+
+3. Build and run:
+```bash
+docker-compose up -d
+```
+
+#### Feishu Card Delivery
+
+To receive paper recommendations as Feishu cards:
+
+1. Create a Feishu bot in your Feishu group or chat
+2. Get the webhook URL from the bot settings
+3. Set in your `.env`:
+```
+DELIVERY_MODE=feishu
+FEISHU_ENABLED=true
+FEISHU_WEBHOOK_URL=https://open.feishu.cn/open-apis/bot/v2/hook/your-webhook-id
+FEISHU_BOT_NAME=arXiv Daily Bot
+```
+
+#### Scheduling with Cron
+
+Add to your crontab to run daily:
+```bash
+0 6 * * * cd /path/to/zotero-arxiv-daily && docker-compose run --rm zotero-arxiv-daily
+```
+
+Or use Docker's `--schedule` flag with a healthcheck for reliability.
 
 ## 🚀 Sync with the latest version
 This project is in active development. You can subscribe this repo via `Watch` so that you can be notified once we publish new release.

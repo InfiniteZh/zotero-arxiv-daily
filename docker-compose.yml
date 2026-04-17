@@ -1,0 +1,72 @@
+services:
+  zotero-arxiv-daily:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        http_proxy: ${CONTAINER_HTTP_PROXY:-}
+        https_proxy: ${CONTAINER_HTTPS_PROXY:-}
+        no_proxy: ${CONTAINER_NO_PROXY:-}
+        HTTP_PROXY: ${CONTAINER_HTTP_PROXY:-}
+        HTTPS_PROXY: ${CONTAINER_HTTPS_PROXY:-}
+        NO_PROXY: ${CONTAINER_NO_PROXY:-}
+    container_name: zotero-arxiv-daily
+    env_file:
+      - .env
+    environment:
+      # Zotero settings
+      - ZOTERO_ID=${ZOTERO_ID}
+      - ZOTERO_KEY=${ZOTERO_KEY}
+      - ZOTERO_INCLUDE_PATH=${ZOTERO_INCLUDE_PATH:-null}
+      - ZOTERO_IGNORE_PATH=${ZOTERO_IGNORE_PATH:-null}
+
+      # Source settings
+      - SOURCE_ARXIV_CATEGORY=${SOURCE_ARXIV_CATEGORY:-}
+      - SOURCE_ARXIV_INCLUDE_CROSS_LIST=${SOURCE_ARXIV_INCLUDE_CROSS_LIST:-false}
+      - SOURCE_BIORXIV_CATEGORY=${SOURCE_BIORXIV_CATEGORY:-}
+      - SOURCE_MEDRXIV_CATEGORY=${SOURCE_MEDRXIV_CATEGORY:-}
+
+      # Delivery mode: feishu, nanoclaw, or email
+      - DELIVERY_MODE=${DELIVERY_MODE:-feishu}
+
+      # Feishu settings
+      - FEISHU_ENABLED=${FEISHU_ENABLED:-true}
+      - FEISHU_WEBHOOK_URL=${FEISHU_WEBHOOK_URL:-}
+      - FEISHU_BOT_NAME=${FEISHU_BOT_NAME:-arXiv Daily Bot}
+      - FEISHU_TIMEOUT=${FEISHU_TIMEOUT:-30}
+      - FEISHU_MAX_RETRIES=${FEISHU_MAX_RETRIES:-3}
+
+      # NanoClaw settings
+      - NANOCLAW_ENABLED=${NANOCLAW_ENABLED:-true}
+      - NANOCLAW_ENDPOINT=${NANOCLAW_ENDPOINT:-http://localhost:3000/api/paper-digests}
+      - NANOCLAW_TOKEN=${NANOCLAW_TOKEN:-}
+      - NANOCLAW_TIMEOUT=${NANOCLAW_TIMEOUT:-30}
+      - NANOCLAW_INCLUDE_FULL_TEXT=${NANOCLAW_INCLUDE_FULL_TEXT:-true}
+      - NANOCLAW_MAX_RETRIES=${NANOCLAW_MAX_RETRIES:-3}
+
+      # Email settings (when DELIVERY_MODE=email)
+      - SENDER=${SENDER:-}
+      - RECEIVER=${RECEIVER:-}
+      - SENDER_PASSWORD=${SENDER_PASSWORD:-}
+
+      # LLM settings
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_API_BASE=${OPENAI_API_BASE:-}
+
+      # Reranker settings
+      - HF_ENDPOINT=${HF_ENDPOINT:-}
+      - HF_HUB_DISABLE_XET=${HF_HUB_DISABLE_XET:-1}
+
+      # Executor settings
+      - DEBUG=${DEBUG:-false}
+    volumes:
+      # Mount config directory for custom.yaml overrides
+      - ./config:/app/config:ro
+      # Cache for sentence-transformers models
+      - model-cache:/root/.cache
+    restart: unless-stopped
+    # For GitHub Actions cron scheduling, comment out 'restart' and 'entrypoint'
+    # entrypoint: ["uv", "run", "python", "-m", "src.zotero_arxiv_daily.main"]
+
+volumes:
+  model-cache:

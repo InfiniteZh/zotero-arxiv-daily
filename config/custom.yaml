@@ -12,7 +12,14 @@ email:
   sender_password: ${oc.env:SENDER_PASSWORD}
 
 delivery:
-  mode: ${oc.env:DELIVERY_MODE,nanoclaw}
+  mode: ${oc.env:DELIVERY_MODE,feishu}
+
+feishu:
+  enabled: ${oc.decode:${oc.env:FEISHU_ENABLED,true}}
+  webhook_url: ${oc.env:FEISHU_WEBHOOK_URL,null}
+  bot_name: ${oc.env:FEISHU_BOT_NAME,arXiv Daily Bot}
+  timeout: ${oc.decode:${oc.env:FEISHU_TIMEOUT,30}}
+  max_retries: ${oc.decode:${oc.env:FEISHU_MAX_RETRIES,3}}
 
 nanoclaw:
   enabled: ${oc.decode:${oc.env:NANOCLAW_ENABLED,true}}
@@ -34,5 +41,5 @@ source:
     category: ["cs.AI","cs.CV","cs.LG","cs.CL"]
 
 executor:
-  debug: ${oc.env:DEBUG,null}
+  debug: ${oc.decode:${oc.env:DEBUG,false}}
   source: ['arxiv']

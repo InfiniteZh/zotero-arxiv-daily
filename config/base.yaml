@@ -21,7 +21,14 @@ email:
   sender_password: ??? # The password of the sender account. Note that it's not necessarily the password for logging in the e-mail client, but the authentication code for SMTP service. Ask your email provider for this. Example: abcdefghijklmn
 
 delivery:
-  mode: email # Delivery backend. Example: email or nanoclaw
+  mode: email # Delivery backend. Example: email, nanoclaw, or feishu
+
+feishu:
+  enabled: false # Whether Feishu publishing is enabled. Example: true
+  webhook_url: null # Feishu webhook URL for sending cards. Example: https://open.feishu.cn/open-apis/bot/v2/hook/xxx
+  bot_name: arXiv Daily Bot # Name of the bot displayed in Feishu. Example: arXiv Daily Bot
+  timeout: 30 # Request timeout in seconds. Example: 30
+  max_retries: 3 # Number of retries for network failures. Example: 3
 
 nanoclaw:
   enabled: false # Whether NanoClaw handoff is enabled. Example: true

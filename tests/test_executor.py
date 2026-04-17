@@ -349,6 +349,94 @@ def test_run_nanoclaw_mode_empty_ranked_batch_uses_nanoclaw_path(config, monkeyp
     assert "No new papers found. No email will be sent." not in messages
 
 
+def test_run_feishu_mode_publishes_ranked_batch(config, monkeypatch):
+    from omegaconf import open_dict
+
+    from tests.canned_responses import make_sample_paper, make_stub_zotero_client
+
+    with open_dict(config):
+        config.delivery.mode = "feishu"
+        config.feishu.enabled = True
+        config.feishu.webhook_url = "https://feishu.example/hook"
+        config.executor.source = ["arxiv"]
+        config.executor.reranker = "api"
+        config.executor.max_paper_num = 1
+
+    stub_zot = make_stub_zotero_client(
+        items=[
+            {
+                "data": {
+                    "title": "Corpus Keep",
+                    "abstractNote": "Keep corpus abstract.",
+                    "dateAdded": "2026-03-01T00:00:00Z",
+                    "collections": ["COL1"],
+                }
+            }
+        ]
+    )
+    monkeypatch.setattr("zotero_arxiv_daily.executor.zotero.Zotero", lambda *a, **kw: stub_zot)
+
+    def make_embedding_client():
+        def embeddings_create(**kwargs):
+            vectors = []
+            for text in kwargs.get("input", []):
+                normalized = text.lower()
+                if "keep" in normalized:
+                    vectors.append(SimpleNamespace(embedding=[1.0, 0.0]))
+                else:
+                    vectors.append(SimpleNamespace(embedding=[0.0, 1.0]))
+            return SimpleNamespace(data=vectors)
+
+        return SimpleNamespace(
+            chat=SimpleNamespace(
+                completions=SimpleNamespace(create=lambda **kwargs: SimpleNamespace(choices=[])),
+            ),
+            embeddings=SimpleNamespace(create=embeddings_create),
+        )
+
+    stub_client = make_embedding_client()
+    monkeypatch.setattr("zotero_arxiv_daily.executor.OpenAI", lambda **kw: stub_client)
+    monkeypatch.setattr("zotero_arxiv_daily.reranker.api.OpenAI", lambda **kw: stub_client)
+
+    import zotero_arxiv_daily.retriever.arxiv_retriever  # noqa: F401
+
+    from zotero_arxiv_daily.retriever.base import registered_retrievers
+
+    retrieved = [
+        make_sample_paper(title="Keep Me", abstract="Keep this candidate abstract.", score=None),
+        make_sample_paper(title="Drop Me", abstract="Drop this candidate abstract.", score=None),
+    ]
+    monkeypatch.setattr(registered_retrievers["arxiv"], "retrieve_papers", lambda self: retrieved)
+    monkeypatch.setattr("zotero_arxiv_daily.retriever.base.sleep", lambda _: None)
+
+    published = {}
+
+    def fake_publish_to_feishu(config, papers, *, generated_at):
+        published["titles"] = [paper.title for paper in papers]
+        published["generated_at"] = generated_at
+        return {"code": 0}
+
+    monkeypatch.setattr("zotero_arxiv_daily.executor.publish_to_feishu", fake_publish_to_feishu)
+    monkeypatch.setattr(
+        "zotero_arxiv_daily.executor.publish_batch",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("publish_batch should not be called")),
+    )
+    monkeypatch.setattr(
+        "zotero_arxiv_daily.executor.render_email",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("render_email should not be called")),
+    )
+    monkeypatch.setattr(
+        "zotero_arxiv_daily.executor.send_email",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("send_email should not be called")),
+    )
+
+    executor = Executor(config)
+    executor.run()
+
+    assert published["titles"] == ["Keep Me"]
+    assert published["generated_at"]
+
+
 def test_run_email_mode_keeps_legacy_email_flow(config, monkeypatch):
     import smtplib
 
