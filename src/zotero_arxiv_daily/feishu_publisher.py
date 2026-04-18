@@ -96,13 +96,15 @@ def _build_paper_markdown(config: DictConfig, paper: Paper, index: int) -> str:
         else f"<font color='grey'>Authors: {_format_authors(paper.authors)}</font>"
     )
     meta_line = f"{_paper_badges(paper, index, chinese_ui=chinese_ui)}<br/>{authors_line}"
+    summary_label = _summary_label(config)
+    summary_text = _normalize_summary_text(paper.tldr or paper.abstract)
     summary_block = (
-        f"<text_tag color='carmine'>{_summary_label(config)}</text_tag><br/>{_normalize_summary_text(paper.tldr or paper.abstract)}"
+        f"<text_tag color='carmine'>{summary_label}</text_tag> {summary_text}"
     )
     return (
         f"**{index}. {paper.title or 'Untitled'}**<br/>"
         f"{meta_line}<br/>"
-        f"{summary_block}<br/><br/>"
+        f"{summary_block}<br/>"
         f"{_paper_links(paper, chinese_ui=chinese_ui)}"
     )
 
