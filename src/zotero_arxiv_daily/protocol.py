@@ -8,6 +8,11 @@ from loguru import logger
 import json
 RawPaperItem = TypeVar('RawPaperItem')
 
+
+def _strip_reasoning_blocks(text: str) -> str:
+    cleaned = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE)
+    return cleaned.strip()
+
 @dataclass
 class Paper:
     source: str
@@ -53,7 +58,7 @@ class Paper:
             ],
             **llm_params.get('generation_kwargs', {})
         )
-        tldr = response.choices[0].message.content
+        tldr = _strip_reasoning_blocks(response.choices[0].message.content or "")
         return tldr
     
     def generate_tldr(self, openai_client:OpenAI,llm_params:dict) -> str:

@@ -55,6 +55,29 @@ def test_tldr_truncates_long_prompt(llm_params):
     assert result is not None
 
 
+def test_tldr_strips_reasoning_blocks(llm_params):
+    from types import SimpleNamespace
+
+    client = SimpleNamespace(
+        chat=SimpleNamespace(
+            completions=SimpleNamespace(
+                create=lambda **kwargs: SimpleNamespace(
+                    choices=[
+                        SimpleNamespace(
+                            message=SimpleNamespace(
+                                content="<think>internal reasoning</think>\n\n这是最终中文总结。"
+                            )
+                        )
+                    ]
+                )
+            )
+        )
+    )
+    paper = make_sample_paper()
+    result = paper.generate_tldr(client, llm_params)
+    assert result == "这是最终中文总结。"
+
+
 # ---------------------------------------------------------------------------
 # generate_affiliations
 # ---------------------------------------------------------------------------

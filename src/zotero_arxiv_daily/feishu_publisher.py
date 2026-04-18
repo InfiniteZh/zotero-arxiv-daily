@@ -1,4 +1,5 @@
 import json
+import re
 import socket
 from datetime import datetime
 from time import sleep
@@ -14,18 +15,17 @@ from .protocol import Paper
 
 def _format_source_label(source: str) -> str:
     label_map = {
-        "arxiv": ("arXiv", "blue"),
-        "biorxiv": ("bioRxiv", "turquoise"),
-        "medrxiv": ("medRxiv", "orange"),
+        "arxiv": "arXiv",
+        "biorxiv": "bioRxiv",
+        "medrxiv": "medRxiv",
     }
-    label, color = label_map.get(source.lower(), (source.upper(), "neutral"))
-    return f"<text_tag color='{color}'>{label}</text_tag>"
+    return label_map.get(source.lower(), source.upper())
 
 
 def _format_score(score: float | None) -> str:
     if score is None:
-        return "`Score: N/A`"
-    return f"`Score: {score:.1f}`"
+        return "评分 N/A"
+    return f"评分 {score:.1f}"
 
 
 def _format_authors(authors: list[str]) -> str:
@@ -46,19 +46,64 @@ def _truncate_summary(text: str | None, limit: int = 360) -> str:
     return normalized[: limit - 3] + "..."
 
 
-def _build_paper_markdown(paper: Paper, index: int) -> str:
+def _is_chinese_ui(config: DictConfig) -> bool:
+    language = str(getattr(config.llm, "language", "English")).lower()
+    return "chinese" in language or language.startswith("zh") or "中文" in language
+
+
+def _summary_label(config: DictConfig) -> str:
+    if _is_chinese_ui(config):
+        return "LLM总结"
+    return "TL;DR:"
+
+
+def _normalize_summary_text(text: str | None) -> str:
+    summary = _truncate_summary(text)
+    summary = re.sub(r"^\*\*\s*(TL;?DR|TLDR|摘要|总结)\s*[：:]\s*\*\*\s*", "", summary, flags=re.IGNORECASE)
+    summary = re.sub(r"^(TL;?DR|TLDR|摘要|总结)\s*[：:]\s*", "", summary, flags=re.IGNORECASE)
+    return summary.strip()
+
+
+def _paper_badges(paper: Paper, index: int, *, chinese_ui: bool) -> str:
+    rank_label = f"TOP {index}" if chinese_ui else f"Rank {index}"
+    return " ".join(
+        [
+            f"<text_tag color='blue'>{_format_source_label(paper.source)}</text_tag>",
+            f"<text_tag color='indigo'>{rank_label}</text_tag>",
+            f"<text_tag color='green'>{_format_score(paper.score)}</text_tag>",
+        ]
+    )
+
+
+def _paper_links(paper: Paper, *, chinese_ui: bool) -> str:
     links = []
     if paper.url:
-        links.append(f"[Abstract]({paper.url})")
+        links.append(
+            f"[查看摘要]({paper.url})" if chinese_ui else f"[Abstract]({paper.url})"
+        )
     if paper.pdf_url:
-        links.append(f"[PDF]({paper.pdf_url})")
+        links.append(
+            f"[打开 PDF]({paper.pdf_url})" if chinese_ui else f"[PDF]({paper.pdf_url})"
+        )
+    return " | ".join(links) if links else "No external links"
 
+
+def _build_paper_markdown(config: DictConfig, paper: Paper, index: int) -> str:
+    chinese_ui = _is_chinese_ui(config)
+    authors_line = (
+        f"<font color='grey'>作者：{_format_authors(paper.authors)}</font>"
+        if chinese_ui
+        else f"<font color='grey'>Authors: {_format_authors(paper.authors)}</font>"
+    )
+    meta_line = f"{_paper_badges(paper, index, chinese_ui=chinese_ui)}<br/>{authors_line}"
+    summary_block = (
+        f"<text_tag color='carmine'>{_summary_label(config)}</text_tag><br/>{_normalize_summary_text(paper.tldr or paper.abstract)}"
+    )
     return (
-        f"**{index}. {paper.title or 'Untitled'}**\n"
-        f"{_format_source_label(paper.source)} {_format_score(paper.score)}\n"
-        f"**Authors:** {_format_authors(paper.authors)}\n"
-        f"> {_truncate_summary(paper.tldr or paper.abstract)}\n"
-        f"{' | '.join(links) if links else 'No external links'}"
+        f"**{index}. {paper.title or 'Untitled'}**<br/>"
+        f"{meta_line}<br/>"
+        f"{summary_block}<br/><br/>"
+        f"{_paper_links(paper, chinese_ui=chinese_ui)}"
     )
 
 
@@ -73,11 +118,20 @@ def _build_feishu_card(
     bot_name = getattr(config.feishu, "bot_name", "arXiv Daily Bot")
     paper_count = len(papers)
     source_tags = " ".join(_format_source_label(source) for source in config.executor.source)
+    chinese_ui = _is_chinese_ui(config)
+    header_title = "论文速递" if chinese_ui else "Paper Digest"
+    summary_title = f"**今日精选 {paper_count} 篇论文**" if chinese_ui else f"**Found {paper_count} ranked papers for today.**"
+    meta_line = (
+        f"<font color='grey'>来源：{source_tags} · 生成时间：{generated_dt.strftime('%Y-%m-%d %H:%M')}</font>"
+        if chinese_ui
+        else f"<font color='grey'>Sources: {source_tags} · Generated: {generated_dt.strftime('%Y-%m-%d %H:%M')}</font>"
+    )
+    empty_state = "本次运行没有筛选出论文。" if chinese_ui else "No ranked papers were selected for this run."
 
     header = {
         "title": {
             "tag": "plain_text",
-            "content": f"Paper Digest | {today}",
+            "content": f"{header_title} | {today}",
         },
         "template": "blue",
     }
@@ -87,11 +141,7 @@ def _build_feishu_card(
             "tag": "div",
             "text": {
                 "tag": "lark_md",
-                "content": (
-                    f"Found **{paper_count}** ranked papers for today.\n"
-                    f"**Sources:** {source_tags}\n"
-                    f"**Generated:** `{generated_at}`"
-                ),
+                "content": f"{summary_title}\n{meta_line}",
             },
         },
         {"tag": "hr"},
@@ -104,7 +154,7 @@ def _build_feishu_card(
                     "tag": "div",
                     "text": {
                         "tag": "lark_md",
-                        "content": _build_paper_markdown(paper, i),
+                        "content": _build_paper_markdown(config, paper, i),
                     },
                 }
             )
@@ -116,18 +166,24 @@ def _build_feishu_card(
                 "tag": "div",
                 "text": {
                     "tag": "lark_md",
-                    "content": "No ranked papers were selected for this run.",
+                    "content": empty_state,
                 },
             }
         )
 
     elements.extend(
         [
-            {"tag": "hr"},
             {
                 "tag": "note",
                 "elements": [
-                    {"tag": "plain_text", "content": f"Powered by {bot_name}"},
+                    {
+                        "tag": "plain_text",
+                        "content": (
+                            f"由 {bot_name} 生成"
+                            if chinese_ui
+                            else f"Powered by {bot_name}"
+                        ),
+                    },
                 ],
             },
         ]

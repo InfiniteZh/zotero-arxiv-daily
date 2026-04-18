@@ -437,6 +437,71 @@ def test_run_feishu_mode_publishes_ranked_batch(config, monkeypatch):
     assert published["generated_at"]
 
 
+def test_run_feishu_mode_generates_tldr_before_publishing(config, monkeypatch):
+    from omegaconf import open_dict
+
+    from tests.canned_responses import make_sample_paper, make_stub_openai_client, make_stub_zotero_client
+
+    with open_dict(config):
+        config.delivery.mode = "feishu"
+        config.feishu.enabled = True
+        config.feishu.webhook_url = "https://feishu.example/hook"
+        config.executor.source = ["arxiv"]
+        config.executor.reranker = "api"
+        config.executor.max_paper_num = 1
+
+    stub_zot = make_stub_zotero_client(
+        items=[
+            {
+                "data": {
+                    "title": "Corpus Keep",
+                    "abstractNote": "Keep corpus abstract.",
+                    "dateAdded": "2026-03-01T00:00:00Z",
+                    "collections": ["COL1"],
+                }
+            }
+        ]
+    )
+    monkeypatch.setattr("zotero_arxiv_daily.executor.zotero.Zotero", lambda *a, **kw: stub_zot)
+
+    stub_client = make_stub_openai_client()
+    monkeypatch.setattr("zotero_arxiv_daily.executor.OpenAI", lambda **kw: stub_client)
+    monkeypatch.setattr("zotero_arxiv_daily.reranker.api.OpenAI", lambda **kw: stub_client)
+
+    import zotero_arxiv_daily.retriever.arxiv_retriever  # noqa: F401
+
+    from zotero_arxiv_daily.retriever.base import registered_retrievers
+
+    paper = make_sample_paper(title="Keep Me", abstract="Keep this candidate abstract.", score=None)
+    events = []
+
+    def generate_tldr(openai_client, llm_params):
+        events.append("tldr:Keep Me")
+        paper.tldr = "LLM summary for Keep Me"
+        return paper.tldr
+
+    paper.generate_tldr = generate_tldr
+    monkeypatch.setattr(registered_retrievers["arxiv"], "retrieve_papers", lambda self: [paper])
+    monkeypatch.setattr("zotero_arxiv_daily.retriever.base.sleep", lambda _: None)
+
+    published = {}
+
+    def fake_publish_to_feishu(config, papers, *, generated_at):
+        events.append("publish")
+        published["tldr"] = papers[0].tldr
+        published["generated_at"] = generated_at
+        return {"code": 0}
+
+    monkeypatch.setattr("zotero_arxiv_daily.executor.publish_to_feishu", fake_publish_to_feishu)
+
+    executor = Executor(config)
+    executor.run()
+
+    assert events == ["tldr:Keep Me", "publish"]
+    assert published["tldr"] == "LLM summary for Keep Me"
+    assert published["generated_at"]
+
+
 def test_run_email_mode_keeps_legacy_email_flow(config, monkeypatch):
     import smtplib
 

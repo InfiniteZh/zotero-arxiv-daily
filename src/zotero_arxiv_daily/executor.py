@@ -41,6 +41,13 @@ class Executor:
         }
         self.reranker = get_reranker_cls(config.executor.reranker)(config)
         self.openai_client = OpenAI(api_key=config.llm.api.key, base_url=config.llm.api.base_url)
+
+    def enrich_papers_with_llm(self, papers, *, include_affiliations: bool = False):
+        for paper in tqdm(papers):
+            paper.generate_tldr(self.openai_client, self.config.llm)
+            if include_affiliations:
+                paper.generate_affiliations(self.openai_client, self.config.llm)
+
     def fetch_zotero_corpus(self) -> list[CorpusPaper]:
         logger.info("Fetching zotero corpus")
         zot = zotero.Zotero(self.config.zotero.user_id, 'user', self.config.zotero.api_key)
@@ -132,6 +139,8 @@ class Executor:
             if len(reranked_papers) == 0:
                 logger.info("No papers selected for Feishu publishing.")
                 return
+            logger.info("Generating TLDR summaries for Feishu...")
+            self.enrich_papers_with_llm(reranked_papers)
             generated_at = datetime.now().astimezone().isoformat(timespec="seconds")
             logger.info(
                 "Publishing {} papers to Feishu",
@@ -147,9 +156,7 @@ class Executor:
 
             if len(all_papers) > 0:
                 logger.info("Generating TLDR and affiliations...")
-                for p in tqdm(reranked_papers):
-                    p.generate_tldr(self.openai_client, self.config.llm)
-                    p.generate_affiliations(self.openai_client, self.config.llm)
+                self.enrich_papers_with_llm(reranked_papers, include_affiliations=True)
             logger.info("Sending email...")
             email_content = render_email(reranked_papers)
             send_email(self.config, email_content)

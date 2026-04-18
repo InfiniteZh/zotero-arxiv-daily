@@ -14,6 +14,7 @@ from zotero_arxiv_daily.feishu_publisher import _build_feishu_card, publish_to_f
 def test_build_feishu_card_contains_summary_tags_and_links(config):
     with open_dict(config):
         config.feishu.bot_name = "Paper Bot"
+        config.llm.language = "Chinese"
 
     papers = [
         make_sample_paper(
@@ -31,7 +32,7 @@ def test_build_feishu_card_contains_summary_tags_and_links(config):
     payload = _build_feishu_card(config, papers, generated_at="2026-04-17T15:30:00+08:00")
 
     assert payload["msg_type"] == "interactive"
-    assert payload["card"]["header"]["title"]["content"].startswith("Paper Digest")
+    assert payload["card"]["header"]["title"]["content"].startswith("论文速递")
 
     elements = payload["card"]["elements"]
     joined = "\n".join(
@@ -40,12 +41,21 @@ def test_build_feishu_card_contains_summary_tags_and_links(config):
         if element.get("tag") == "div" and "text" in element
     )
 
-    assert "Found **1** ranked papers" in joined
-    assert "<text_tag color='blue'>arXiv</text_tag>" in joined
+    assert "**今日精选 1 篇论文**" in joined
+    assert "来源：arXiv" in joined
     assert "**1. Graph Reasoning for Agents**" in joined
-    assert "[Abstract](https://arxiv.org/abs/2604.00001)" in joined
-    assert "[PDF](https://arxiv.org/pdf/2604.00001)" in joined
+    assert "<text_tag color='blue'>arXiv</text_tag>" in joined
+    assert "<text_tag color='indigo'>TOP 1</text_tag>" in joined
+    assert "<text_tag color='green'>评分 9.3</text_tag>" in joined
+    assert "<text_tag color='carmine'>LLM总结</text_tag>" in joined
+    assert "A short ranked summary." in joined
+    assert "作者：" in joined
     assert "Alice, Bob, Carol, Dave, Eve et al." in joined
+    assert "查看摘要" in joined
+    assert "打开 PDF" in joined
+    assert "###" not in joined
+    assert "\n>" not in joined
+    assert len(payload["card"]["elements"]) <= 5
 
 
 def test_publish_to_feishu_accepts_success_response(config, monkeypatch):

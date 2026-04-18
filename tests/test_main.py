@@ -139,3 +139,110 @@ def test_custom_config_defaults_delivery_mode_to_feishu(monkeypatch):
         )
 
     assert cfg.delivery.mode == "feishu"
+
+
+def test_custom_config_can_decode_arxiv_categories_from_env(monkeypatch):
+    """Verify Hydra composes arXiv categories from env-backed config."""
+    monkeypatch.setenv(
+        "SOURCE_ARXIV_CATEGORY",
+        '["cs.CR","cs.SE","cs.AI","cs.CL","cs.LG","stat.ML","cs.HC","cs.CY"]',
+    )
+
+    GlobalHydra.instance().clear()
+    with initialize_config_dir(config_dir=_CONFIG_DIR, version_base=None):
+        cfg = compose(
+            config_name="default",
+            overrides=[
+                "zotero.user_id=000000",
+                "zotero.api_key=fake-zotero-key",
+                "email.sender=test@example.com",
+                "email.receiver=test@example.com",
+                "email.smtp_server=localhost",
+                "email.smtp_port=1025",
+                "email.sender_password=test",
+                "feishu.webhook_url=https://feishu.example/hook",
+                "llm.api.key=sk-fake",
+                "llm.api.base_url=http://localhost:30000/v1",
+                "llm.generation_kwargs.model=gpt-4o-mini",
+                "reranker.api.key=sk-fake",
+                "reranker.api.base_url=http://localhost:30000/v1",
+                "reranker.api.model=text-embedding-3-large",
+                "executor.source=[arxiv]",
+                "executor.reranker=api",
+                "executor.debug=false",
+                "executor.send_empty=false",
+            ],
+        )
+
+    assert cfg.source.arxiv.category == [
+        "cs.CR",
+        "cs.SE",
+        "cs.AI",
+        "cs.CL",
+        "cs.LG",
+        "stat.ML",
+        "cs.HC",
+        "cs.CY",
+    ]
+
+
+def test_custom_config_can_override_llm_model_from_env(monkeypatch):
+    monkeypatch.setenv("OPENAI_MODEL", "MiniMax-M2.7")
+
+    GlobalHydra.instance().clear()
+    with initialize_config_dir(config_dir=_CONFIG_DIR, version_base=None):
+        cfg = compose(
+            config_name="default",
+            overrides=[
+                "zotero.user_id=000000",
+                "zotero.api_key=fake-zotero-key",
+                "email.sender=test@example.com",
+                "email.receiver=test@example.com",
+                "email.smtp_server=localhost",
+                "email.smtp_port=1025",
+                "email.sender_password=test",
+                "feishu.webhook_url=https://feishu.example/hook",
+                "llm.api.key=sk-fake",
+                "llm.api.base_url=http://localhost:30000/v1",
+                "reranker.api.key=sk-fake",
+                "reranker.api.base_url=http://localhost:30000/v1",
+                "reranker.api.model=text-embedding-3-large",
+                "executor.source=[arxiv]",
+                "executor.reranker=api",
+                "executor.debug=false",
+                "executor.send_empty=false",
+            ],
+        )
+
+    assert cfg.llm.generation_kwargs.model == "MiniMax-M2.7"
+
+
+def test_custom_config_can_override_llm_language_from_env(monkeypatch):
+    monkeypatch.setenv("LLM_LANGUAGE", "Chinese")
+
+    GlobalHydra.instance().clear()
+    with initialize_config_dir(config_dir=_CONFIG_DIR, version_base=None):
+        cfg = compose(
+            config_name="default",
+            overrides=[
+                "zotero.user_id=000000",
+                "zotero.api_key=fake-zotero-key",
+                "email.sender=test@example.com",
+                "email.receiver=test@example.com",
+                "email.smtp_server=localhost",
+                "email.smtp_port=1025",
+                "email.sender_password=test",
+                "feishu.webhook_url=https://feishu.example/hook",
+                "llm.api.key=sk-fake",
+                "llm.api.base_url=http://localhost:30000/v1",
+                "reranker.api.key=sk-fake",
+                "reranker.api.base_url=http://localhost:30000/v1",
+                "reranker.api.model=text-embedding-3-large",
+                "executor.source=[arxiv]",
+                "executor.reranker=api",
+                "executor.debug=false",
+                "executor.send_empty=false",
+            ],
+        )
+
+    assert cfg.llm.language == "Chinese"

@@ -34,11 +34,12 @@ llm:
     key: ${oc.env:OPENAI_API_KEY}
     base_url: ${oc.env:OPENAI_API_BASE}
   generation_kwargs:
-    model: gpt-4o-mini
+    model: ${oc.env:OPENAI_MODEL,gpt-4o-mini}
+  language: ${oc.env:LLM_LANGUAGE,English}
 
 source:
   arxiv:
-    category: ["cs.AI","cs.CV","cs.LG","cs.CL"]
+    category: ${oc.decode:${oc.env:SOURCE_ARXIV_CATEGORY,'["cs.CR","cs.SE","cs.AI","cs.CL","cs.LG","stat.ML","cs.HC","cs.CY"]'}}
 
 executor:
   debug: ${oc.decode:${oc.env:DEBUG,false}}
