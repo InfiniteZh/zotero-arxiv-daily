@@ -22,9 +22,13 @@ RUN uv sync --frozen --no-install-project
 # Copy project source
 COPY src ./src
 COPY config ./config
+COPY docker-entrypoint.sh /docker-entrypoint.sh
+
+# Make entrypoint executable
+RUN chmod +x /docker-entrypoint.sh
 
 # Set Python path
 ENV PYTHONPATH=/app/src
 
-# Default command (can be overridden in docker-compose)
-CMD ["uv", "run", "src/zotero_arxiv_daily/main.py"]
+# Use entrypoint script for scheduled runs
+ENTRYPOINT ["/docker-entrypoint.sh"]
